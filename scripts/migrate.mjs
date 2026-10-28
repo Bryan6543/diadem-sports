@@ -131,13 +131,37 @@ async function insertProduct(client, p) {
   );
 }
 
+/**
+ * Supabase shows the connection string with the raw password, so a password containing @ ? # / : %
+ * makes it an invalid URL ("Invalid URL"). Percent-encode the password part (between the first ":"
+ * after the user and the last "@") when the string doesn't parse as it is.
+ */
+function connectionUrl(raw) {
+  const s = raw.replace(/^["']|["']$/g, "");
+  try {
+    new URL(s);
+    return s;
+  } catch {
+    const m = s.match(/^(postgres(?:ql)?:\/\/[^:/@]+):(.*)@([^@]+)$/);
+    if (!m) throw new Error("SUPABASE_DB_URL is not a valid postgresql:// connection string");
+    const [, head, password, rest] = m;
+    let plain = password;
+    try {
+      plain = decodeURIComponent(password);
+    } catch {
+      /* raw password containing a literal % */
+    }
+    return `${head}:${encodeURIComponent(plain)}@${rest}`;
+  }
+}
+
 async function main() {
   const url = process.env.SUPABASE_DB_URL?.trim();
   if (!url) {
     log("SUPABASE_DB_URL not set — skipping (the site will use bundled data).");
     return;
   }
-  const client = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+  const client = new pg.Client({ connectionString: connectionUrl(url), ssl: { rejectUnauthorized: false } });
   await client.connect();
   try {
     await client.query(`create table if not exists public._app_migrations (
